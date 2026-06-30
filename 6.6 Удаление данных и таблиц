@@ -1,0 +1,65 @@
+6.6 Удаление данных и таблиц
+------
+
+import sqlite3
+
+"""Создание New базы данных"""
+# Создание базы данных
+db = sqlite3.connect('test_sql.db')
+print("✅ Подключение к БД установлено")
+cur = db.cursor() # рука в базе данных
+
+
+# """Создание таблицы"""
+# # Создание таблицы
+# cur.execute("""CREATE TABLE IF NOT EXISTS Student_3(
+#     StudentID INTEGER PRIMARY KEY AUTOINCREMENT,
+#     First_name TEXT NOT NULL,
+#     Last_name TEXT NOT NULL);
+# """)
+
+# db.commit() # Сохранение запроса
+# print("✅ Создание таблицы")
+
+
+# """Отправка нескольких запросов"""
+
+# # Создание таблицы
+# cur.executescript("""CREATE TABLE IF NOT EXISTS Student_3(
+#     StudentID INTEGER PRIMARY KEY AUTOINCREMENT,
+#     First_name TEXT NOT NULL,
+#     Last_name TEXT NOT NULL);
+
+#     INSERT INTO Student_3(
+#     First_name,
+#     Last_name)
+#     VALUES ('Алена', 'Шкура');
+# """)
+# db.commit() # Сохранение запроса
+# print("✅ Создание таблицы")
+
+
+# """Изменение данных в таблице"""
+# update_params = ('Лиса', 1)
+# cur.execute("""UPDATE Student_3 SET Last_name = ? WHERE StudentID = ?;""", update_params )
+# # cur.execute("""UPDATE Student_3 SET Last_name = 'Шкуркина' WHERE StudentID = 1  """)
+# db.commit() # Сохранение запроса
+# print("✅ Изменение данных в таблице")
+
+
+# """Удаление данных в таблице"""
+
+# delete_params = '2'
+# cur.execute("""DELETE FROM Student_3 WHERE StudentID = ?;""", delete_params)
+# # cur.execute("""UPDATE Student_3 SET Last_name = 'Шкуркина' WHERE StudentID = 1  """)
+# db.commit() # Сохранение запроса
+# print("✅ Удаление данных в таблице")
+
+
+"""Удаление таблицы"""
+
+cur.execute("""DROP TABLE Student_2""")
+
+db.commit() # Сохранение запроса
+print("✅ Удаление таблицы")
+
