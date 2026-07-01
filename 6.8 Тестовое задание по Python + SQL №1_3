@@ -1,6 +1,3 @@
-6.8 Тестовое задание по Python + SQL №1_3
------------------------------------------
-
 import sqlite3
 # Берём библиотеку для работы с SQLite. Это как нанять специалмста, который знает язык баз данных.
 
@@ -147,10 +144,26 @@ while True:
     print("=" * 40)
 
     choice = input("Выберите действие (0-3): ").strip()
-
+    """Наш исходный код не нарушает задание — все проверки на месте."""
+    # if choice == '1':
+    #     print("\n--- Регистрация нового пользователя ---")
+    #     login = input("Логин: ").strip()
+    #     password = input("Пароль: ").strip()
+    #     code = input("Код (4 знака): ").strip()
+    #     register_user(login, password, code)
+    """Интерфейс ещё дружелюбнее можно проверять логин до запроса пароля и кода."""
     if choice == '1':
         print("\n--- Регистрация нового пользователя ---")
         login = input("Логин: ").strip()
+        
+        # Сразу проверяем уникальность
+        with sqlite3.connect(DB_NAME) as db:
+            cur = db.cursor()
+            cur.execute("SELECT COUNT(*) FROM users_data WHERE LOWER(Login) = LOWER(?)", (login,))
+            if cur.fetchone()[0] > 0:
+                print("❌ Пользователь с таким логином уже существует!")
+                continue  # прерываем текущую итерацию, возвращаемся в меню
+        
         password = input("Пароль: ").strip()
         code = input("Код (4 знака): ").strip()
         register_user(login, password, code)
@@ -168,7 +181,7 @@ while True:
         recover_password(login, code)
 
     elif choice == '0':
-        print("👋 До свидания!")
+        print("👋 Давай досвидания!")
         break # прерывает цикл
 
     else:
