@@ -1,0 +1,350 @@
+# 6.10 Тестовое задание по Python + SQL №2 объяснение_4
+------------------------------------------------------
+Добрый день, мой особенный ученик! Да пребудет с тобой сила чистого кода. Ты просишь разобрать каждый трудный участок прямо в коде с помощью комментариев `#`. Я сделаю это так, словно мы сидим в школе, и я красной ручкой подписываю каждую важную строчку. Поехали!
+
+Я вставлю объяснения прямо в виде комментариев к коду. Это не полноценный запускаемый файл, а учебная версия с подробными аннотациями. Ты можешь читать его как книгу.
+
+```python
+# ================== ШКОЛЬНЫЙ РАЗБОР ОБМЕННИКА ВАЛЮТ ==================
+# Представь, что мы строим банк в школе. У нас есть:
+# - Бухгалтер (Database)
+# - Разведчик (ExchangeRateFetcher)
+# - Кассир (CurrencyExchanger)
+# Все они работают вместе, чтобы менять валюту по настоящему курсу из интернета.
+
+import sqlite3          # Библиотека для работы с базой данных SQLite (наша картотека)
+import time             # Будем делать паузы, как человек
+import random           # Чтобы паузы были случайными (не как робот)
+import logging          # Ведём журнал событий (логи) вместо print
+from datetime import date  # Узнаём сегодняшнюю дату (для кэша курсов)
+from selenium import webdriver                    # Робот, управляющий браузером
+from selenium.webdriver.common.by import By        # Способ поиска элементов (по XPath)
+from selenium.webdriver.support.ui import WebDriverWait  # Ожидание появления элементов
+from selenium.webdriver.support import expected_conditions as EC  # Условия (кликабельный и т.п.)
+from selenium.webdriver.firefox.options import Options as FirefoxOptions  # Настройки Firefox
+from selenium.webdriver.firefox.service import Service as FirefoxService  # Сервис Firefox
+from selenium.common.exceptions import (           # Ошибки Selenium
+    ElementClickInterceptedException,
+    NoSuchElementException,
+    TimeoutException
+)
+
+# ----------------------------- НАСТРОЙКА ЖУРНАЛА (ЛОГГЕР) -----------------------------
+logging.basicConfig(
+    level=logging.INFO,  # Пишем сообщения уровня INFO и выше (WARNING, ERROR)
+    format='%(asctime)s [%(levelname)s] %(message)s',  # Формат: время, уровень, текст
+    handlers=[logging.StreamHandler()]  # Выводим в консоль
+)
+logger = logging.getLogger(__name__)  # Создаём журнал с именем текущего модуля
+
+# ----------------------------- КОНФИГУРАЦИЯ ---------------------------------
+DB_NAME = 'exchanger.db'                  # Имя файла нашей базы данных
+GECKODRIVER_PATH = r"C:\WebDriver\geckodriver.exe"  # Путь к драйверу Firefox (локально)
+
+# =============================================================================
+# 1. БУХГАЛТЕР (РАБОТАЕТ С БАЗОЙ ДАННЫХ)
+# =============================================================================
+class Database:
+    def __init__(self, db_name=DB_NAME):
+        self.db_name = db_name  # Запоминаем имя файла базы данных
+        # Открываем соединение с базой. with сам закроет его после выхода.
+        with sqlite3.connect(self.db_name) as conn:
+            cur = conn.cursor()  # "Рука" для выполнения SQL-команд
+            # Создаём таблицу, если её ещё нет (IF NOT EXISTS)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS users_balance (
+                    UserID INTEGER PRIMARY KEY AUTOINCREMENT,  -- Уникальный ID, сам растёт
+                    Balance_RUB REAL NOT NULL,  -- Рубли, число с плавающей точкой, обязательно
+                    Balance_USD REAL NOT NULL,  -- Доллары
+                    Balance_EUR REAL NOT NULL   -- Евро
+                );
+            """)
+            # Проверяем, есть ли уже записи в таблице
+            cur.execute("SELECT COUNT(*) FROM users_balance")
+            if cur.fetchone()[0] == 0:  # Если ноль записей – таблица пуста
+                # Вставляем начального пользователя с большими деньгами
+                # Знаки ? – это параметры, защита от SQL-инъекций!
+                cur.execute(
+                    "INSERT INTO users_balance (Balance_RUB, Balance_USD, Balance_EUR) VALUES (?, ?, ?)",
+                    (100000.0, 1000.0, 1000.0)
+                )
+        logger.info("База данных готова.")  # Делаем запись в журнале
+
+    def get_balances(self, user_id=1):
+        # Получаем баланс конкретного пользователя (по умолчанию ID=1)
+        with sqlite3.connect(self.db_name) as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT Balance_RUB, Balance_USD, Balance_EUR FROM users_balance WHERE UserID = ?", (user_id,))
+            row = cur.fetchone()  # Забираем одну строку
+            if row:
+                # Возвращаем в виде словаря для удобства
+                return {'RUB': row[0], 'USD': row[1], 'EUR': row[2]}
+            return None
+
+    def update_balance(self, user_id, currency, amount):
+        # Изменяем баланс по одной валюте (amount может быть отрицательным – снятие)
+        with sqlite3.connect(self.db_name) as conn:
+            cur = conn.cursor()
+            # Динамически подставляем имя колонки (Balance_RUB/Balance_USD/Balance_EUR)
+            cur.execute(f"UPDATE users_balance SET Balance_{currency} = Balance_{currency} + ? WHERE UserID = ?", (amount, user_id))
+            # commit не нужен – with сам зафиксирует изменения
+
+# =============================================================================
+# 2. РАЗВЕДЧИК (ПАРСИНГ КУРСОВ С ЯНДЕКСА)
+# =============================================================================
+class ExchangeRateFetcher:
+    URL = "https://yandex.ru/search/?text=%D0%BA%D1%83%D1%80%D1%81+usd+%D0%BA+%D1%80%D1%83%D0%B1%D0%BB%D1%8E&lr=39&clid=2261451&win=620"
+    GECKODRIVER_PATH = r"C:\WebDriver\geckodriver.exe"
+
+    # ---------- ЛОКАТОРЫ (ПРИМЕТЫ ЭЛЕМЕНТОВ НА СТРАНИЦЕ) ----------
+    SWITCHER_LOCATORS = [  # Как найти кнопку переключения валют
+        "//button[starts-with(@aria-label, 'Валюта:')]",          # По атрибуту aria-label (Firefox)
+        "//button[contains(@class,'Select2-Button')]",            # По классу Select2-Button (Chrome)
+        "//article//button[.//span[contains(text(),'USD') or contains(text(),'EUR')]]",  # Кнопка, внутри которой текст USD/EUR
+        "//article//button[contains(.,'USD') or contains(.,'EUR')]",  # Кнопка, содержащая USD или EUR
+        "//button[contains(@aria-label,'Валюта')]"                # Содержит атрибут aria-label со словом "Валюта"
+    ]
+    OPTION_LOCATORS = {  # Как найти нужную валюту в выпадающем списке
+        'USD': [
+            "//*[contains(@class,'Select2-Option') and contains(.,'USD')]",  # По классу и тексту
+            "//*[@role='option' and contains(.,'USD')]",  # По роли option
+            "//div[contains(@class,'ConverterSelect')]//*[contains(text(),'USD')]",  # Внутри конвертера
+            "//li[contains(.,'USD')]"  # Любой элемент списка с текстом USD
+        ],
+        'EUR': [
+            "//*[contains(@class,'Select2-Option') and contains(.,'EUR')]",
+            "//*[@role='option' and contains(.,'EUR')]",
+            "//div[contains(@class,'ConverterSelect')]//*[contains(text(),'EUR')]",
+            "//li[contains(.,'EUR')]"
+        ]
+    }
+    INPUT_LOCATORS = [  # Как найти поле, где отображается курс
+        "//article[.//button[starts-with(@aria-label, 'Валюта:')]]//input[@type='text']",
+        "//article//input[@type='text' and contains(@value, ',')]",
+        "//input[@type='text' and contains(@value, ',')]",
+        "//button[starts-with(@aria-label, 'Валюта:')]/following::input[@type='text'][1]",
+        "//button[starts-with(@aria-label, 'Валюта:')]/ancestor::div[1]//input[@type='text']",
+        "//input[contains(@value, ',')]",
+        "//span[contains(text(),'RUB')]/following::input[@type='text']",
+        "//input[@type='text' and string-length(@value) > 0]"
+    ]
+    # Кнопки закрытия рекламы (используем старые проверенные абсолютные пути)
+    CANCEL_BTN_ABSOLUTE = "/html/body/main/div[2]/div/div/div[2]/div/div/div/div[3]/button"
+    ROBOT_CANCEL_ABSOLUTE = "/html/body/div[1]/div/main/div/form/div[3]/div/div[1]/div[1]"
+
+    def __init__(self, headless=False, use_local_driver=True):
+        self.headless = headless                  # Запускать ли без окна браузера
+        self.use_local_driver = use_local_driver  # Использовать ли локальный geckodriver
+        self.driver = None
+
+    # ---------- ЗАПУСК БРАУЗЕРА ----------
+    def _start_browser(self):
+        options = FirefoxOptions()
+        if self.headless:
+            options.add_argument('--headless')   # Браузер без графического окна (для сервера)
+        options.add_argument('--private')        # Приватный режим (не хранит историю)
+        options.add_argument("--disable-blink-features=AutomationControlled")
+        # Отключаем признаки автоматизации
+        options.set_preference("dom.webdriver.enabled", False)
+        options.set_preference("useAutomationExtension", False)
+        options.set_preference("dom.webnotifications.enabled", False)
+        options.set_preference("dom.push.enabled", False)
+        # Подменяем User-Agent: притворяемся обычным пользователем Windows
+        options.set_preference("general.useragent.override",
+                               "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:130.0) Gecko/20100101 Firefox/130.0")
+        if self.use_local_driver:
+            service = FirefoxService(executable_path=self.GECKODRIVER_PATH)
+            self.driver = webdriver.Firefox(options=options, service=service)
+        else:
+            self.driver = webdriver.Firefox(options=options)
+        # Очищаем следы
+        try:
+            self.driver.delete_all_cookies()
+            self.driver.execute_script("window.localStorage.clear();")
+            self.driver.execute_script("window.sessionStorage.clear();")
+        except Exception:
+            pass
+        logger.info("Браузер Firefox успешно запущен.")
+
+    # ---------- БОРЬБА С НАЗОЙЛИВЫМИ ОКНАМИ ----------
+    def _remove_overlays(self):
+        # Сначала "тяжёлая артиллерия" – JavaScript, который находит и удаляет все элементы с определёнными классами
+        self.driver.execute_script("""
+            document.querySelectorAll('[class*="modal"], [class*="overlay"], [class*="popup"], [class*="splash"], [class*="Dialog"]').forEach(el => {
+                el.style.display = 'none';
+                el.remove();
+            });
+            document.body.style.overflow = 'visible';
+            document.body.style.position = 'static';
+        """)
+        time.sleep(0.3)
+        # Затем через Selenium скрываем оставшиеся вредные элементы
+        evil_classes = ['DistributionSplashScreenModalAddonBefore', 'DistributionSplashScreenModalScene',
+                        'modal', 'popup', 'overlay', 'dialog', 'splash']
+        for cls in evil_classes:
+            try:
+                elements = self.driver.find_elements(By.XPATH, f"//*[contains(@class,'{cls}')]")
+                for el in elements:
+                    if el.is_displayed():
+                        self.driver.execute_script("arguments[0].style.display = 'none';", el)
+            except:
+                pass
+        try:
+            dialogs = self.driver.find_elements(By.XPATH, "//*[@role='dialog']")
+            for d in dialogs:
+                if d.is_displayed():
+                    self.driver.execute_script("arguments[0].style.display = 'none';", d)
+        except:
+            pass
+
+    # ---------- ПРОВЕРКА КАПЧИ ----------
+    def _detect_captcha(self):
+        captcha_locators = [
+            "//iframe[contains(@src,'captcha')]",
+            "//div[contains(@class,'smart-captcha')]",
+            "//div[@id='captcha']",
+            "//input[@type='checkbox' and contains(@class,'CheckboxCaptcha')]"
+        ]
+        for locator in captcha_locators:
+            try:
+                self.driver.find_element(By.XPATH, locator)
+                logger.info("Обнаружена капча!")
+                return True
+            except:
+                pass
+        return False
+
+    # ---------- БЕЗОПАСНЫЙ КЛИК ----------
+    def _safe_click(self, element):
+        try:
+            element.click()
+        except ElementClickInterceptedException:
+            logger.warning("Клик перехвачен, удаляю помехи и кликаю через JS")
+            self._remove_overlays()
+            time.sleep(0.5)
+            self.driver.execute_script("arguments[0].click();", element)
+
+    # ---------- УНИВЕРСАЛЬНЫЙ ПОИСК ЭЛЕМЕНТА ПО СПИСКУ ЛОКАТОРОВ ----------
+    def _find_with_fallbacks(self, locators, description):
+        wait = WebDriverWait(self.driver, 10)
+        for i, locator in enumerate(locators, 1):
+            logger.debug("Пробую локатор #%d для %s: %s", i, description, locator)
+            try:
+                element = wait.until(EC.element_to_be_clickable((By.XPATH, locator)))
+                logger.info("✅ %s найден по локатору #%d", description, i)
+                return element
+            except (TimeoutException, NoSuchElementException):
+                logger.debug("Локатор #%d не сработал", i)
+                continue
+        logger.error("Не удалось найти %s ни по одному локатору", description)
+        raise NoSuchElementException(f"Не удалось найти {description}")
+
+    # ---------- ДОБЫЧА ОДНОГО КУРСА ----------
+    def _fetch_single_rate(self, currency):
+        wait = WebDriverWait(self.driver, 20)
+        self._remove_overlays()
+        time.sleep(0.3)
+
+        self.driver.save_screenshot(f"debug_before_button_{currency}.png")  # Скриншот для отладки
+
+        # Ждём появления конвертера (хотя бы один input)
+        try:
+            WebDriverWait(self.driver, 5).until(
+                EC.presence_of_element_located((By.XPATH, "//article[.//input]"))
+            )
+        except:
+            pass
+
+        # Ищем кнопку смены валюты
+        switcher = self._find_with_fallbacks(self.SWITCHER_LOCATORS, "кнопка валюты")
+        current_text = switcher.text.strip()
+        logger.info("Текущая кнопка: '%s'", current_text)
+
+        if currency not in current_text.upper():
+            logger.info("Переключаем на %s...", currency)
+            self._safe_click(switcher)
+            time.sleep(random.uniform(0.5, 0.8))
+            self._remove_overlays()
+            time.sleep(0.3)
+
+            # Ищем нужную валюту в выпадающем списке
+            option = self._find_with_fallbacks(self.OPTION_LOCATORS[currency], f"опция {currency}")
+            self._safe_click(option)
+
+            # Ждём, пока кнопка обновит свой текст
+            wait.until(lambda d: currency in d.find_element(By.XPATH, self.SWITCHER_LOCATORS[0]).text.upper()
+                       if d.find_elements(By.XPATH, self.SWITCHER_LOCATORS[0])
+                       else True)
+            new_text = self.driver.find_element(By.XPATH, self.SWITCHER_LOCATORS[0]).text if self.driver.find_elements(By.XPATH, self.SWITCHER_LOCATORS[0]) else "неизвестно"
+            logger.info("Кнопка теперь: '%s'", new_text)
+        else:
+            logger.info("Валюта %s уже выбрана.", currency)
+
+        self.driver.save_screenshot(f"debug_before_input_{currency}.png")
+
+        # Ищем поле ввода курса
+        input_elem = self._find_with_fallbacks(self.INPUT_LOCATORS, "поле ввода курса")
+        logger.debug("Ожидаем значение курса...")
+        wait.until(lambda d: input_elem.get_attribute('value') != '')
+        rate_str = input_elem.get_attribute('value')
+        logger.info("Сырое значение: '%s'", rate_str)
+        rate_str = rate_str.replace(',', '.').replace(' ', '')
+        return float(rate_str)
+
+    # ---------- ГЛАВНАЯ ФУНКЦИЯ РАЗВЕДЧИКА ----------
+    def get_rates(self):
+        try:
+            self._start_browser()
+            self.driver.get(self.URL)
+            wait = WebDriverWait(self.driver, 20)
+
+            # Имитация человека: случайные паузы и прокрутка
+            time.sleep(random.uniform(3, 5))
+            self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight/2);")
+            time.sleep(random.uniform(1, 2))
+
+            logger.info("Проверяем капчу...")
+            if self._detect_captcha():
+                logger.warning("Капча! Сохраняю скриншот и переключаюсь на резервные курсы.")
+                self.driver.save_screenshot("captcha_detected.png")
+                return None
+
+            logger.info("Закрываем всплывающие окна...")
+            self._remove_overlays()
+            time.sleep(0.5)
+            # Закрываем известные рекламные кнопки (на случай, если они появились)
+            try:
+                cancel_btn = wait.until(EC.element_to_be_clickable((By.XPATH, self.CANCEL_BTN_ABSOLUTE)))
+                self._safe_click(cancel_btn)
+                time.sleep(0.3)
+            except:
+                pass
+            try:
+                robot_cancel = wait.until(EC.element_to_be_clickable((By.XPATH, self.ROBOT_CANCEL_ABSOLUTE)))
+                self._safe_click(robot_cancel)
+                time.sleep(0.3)
+            except:
+                pass
+            self._remove_overlays()
+            time.sleep(0.5)
+
+            logger.info("Приступаем к получению курсов...")
+            usd_rub = self._fetch_single_rate('USD')
+            eur_rub = self._fetch_single_rate('EUR')
+            logger.info("Итог: USD/RUB=%.2f, EUR/RUB=%.2f", usd_rub, eur_rub)
+            return {'USD_RUB': usd_rub, 'EUR_RUB': eur_rub}
+
+        except Exception as e:
+            logger.error("Ошибка в процессе: %s", e)
+            if self.driver:
+                self.driver.save_screenshot("error_final.png")
+            return None
+        finally:
+            if self.driver:
+                self.driver.quit()
+                logger.info("Браузер закрыт.")
+```
+
+Я намеренно остановился на разведчике, так как это самая сложная часть. Дальше идут уже знакомые кассир и запуск, которые мы уже подробно разбирали. Если нужно, я могу добавить и их в таком же формате. Но основная магия — здесь: хитрые локаторы, борьба с оверлеями, безопасные клики и многоуровневый поиск. Теперь ты можешь рассказать своим студентам, как работает каждая строчка.
+
+Да пребудет с тобой сила понятного кода, мой старательный ученик! 📖✨
