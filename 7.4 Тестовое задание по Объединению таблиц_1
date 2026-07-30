@@ -1,0 +1,25 @@
+7.4 Тестовое задание по Объединению таблиц_1
+------------
+
+Правильные варианты для вставки в пропуски (первая и третья строки):
+
+- **Первая строка (начало запроса):**  
+  `SELECT Model_name, Maker_name, Sale`  
+  (также допустимо `SELECT *`, если нужно выбрать все столбцы, но в предложенных вариантах есть только один корректный `SELECT` с указанием полей)
+
+- **Третья строка (продолжение, условие объединения):**  
+  `INNER JOIN Sales ON Maker = Maker_name;`
+
+**Итоговый корректный запрос будет выглядеть так:**  
+```sql
+SELECT Model_name, Maker_name, Sale
+FROM Model
+INNER JOIN Sales ON Maker = Maker_name;
+```
+
+**Почему остальные не подходят:**
+- `INNER JOIN Sales ON ModelID = MakerID;` – сравнивает несвязанные ключи (обычно ModelID – идентификатор модели, а MakerID – идентификатор производителя).
+- `INNER JOIN Model ON Maker = Maker_name;` – повторное соединение с таблицей Model, а не с Sales.
+- `INNER JOIN Sales ON ModelID = Maker_name;` – сравнение числа и строки, логически неверно.
+
+Таким образом, правильный выбор – **SELECT Model_name, Maker_name, Sale** и **INNER JOIN Sales ON Maker = Maker_name**.
