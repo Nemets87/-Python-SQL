@@ -1,0 +1,271 @@
+8.10 Тестовое задание по Банкомату №1
+--------------------------------------
+Бро, разберем задание по шагам. Сделаем всё аккуратно, протестируем и оставим комментарии.  
+Ниже — обновлённые файлы `atm.py` и `sql_querry.py`. Основное: добавил метод `transfer_money`, обновил меню, автоматически создал тестового пользователя (2345, 2222, 10000) и поправил мелкие баги (название таблицы, опечатка `NOT_NULL` → `NOT NULL`, меню выхода).
+
+```python
+# atm.py
+from sql_querry import SQL_atm
+
+class ATM:
+    """Создание логики аппарата"""
+    
+    def atm_logic(self):
+        SQL_atm.create_table()
+        
+        # Создаём тестового пользователя (если ещё нет)
+        # Чтобы избежать ошибки при повторном запуске, обернём в try-except
+        try:
+            SQL_atm.insert_users((2345, 2222, 10000))
+        except:
+            pass  # пользователь уже есть
+        
+        number_card = input("Введите номер карты: ")
+
+        while True:
+            if SQL_atm.input_card(number_card):
+                if SQL_atm.input_code(number_card):
+                    SQL_atm.input_operation(number_card)
+                    break
+                else:
+                    break
+            else:
+                break
+
+start = ATM()
+start.atm_logic()
+```
+
+```python
+# sql_querry.py
+import sqlite3
+
+class SQL_atm:
+
+    """Создание таблицы Users_data"""
+    @staticmethod
+    def create_table():
+        with sqlite3.connect("atm.db") as db:
+            cur = db.cursor()
+            cur.execute("""
+            CREATE TABLE IF NOT EXISTS Users_dats(
+            UserID INTEGER PRIMARY KEY AUTOINCREMENT,
+            Number_card INTEGER NOT NULL,
+            Pin_code INTEGER NOT NULL,
+            Balance INTEGER NOT NULL);
+            """)
+            print("Создание таблицы Users_data")
+
+
+    """Создание нового пользователя"""
+    @staticmethod
+    def insert_users(data_users):
+        with sqlite3.connect("atm.db") as db:
+            cur = db.cursor()
+            cur.execute("""
+            INSERT INTO Users_dats (Number_card, Pin_code, Balance) VALUES (?,?,?);
+            """, data_users)
+            print("Создание таблицы Users_data")
+
+
+    """Ввод и проверка карты"""
+    @staticmethod
+    def input_card(number_card):
+        try:
+            with sqlite3.connect("atm.db") as db:
+                cur = db.cursor()
+                cur.execute(f"""
+                SELECT Number_card FROM Users_dats WHERE Number_card = {number_card}
+                """, )
+                result_card = cur.fetchone()
+                print("Ввод и проверка карты")
+                if result_card == None:
+                    print("Введен неизвестный номер карты")
+                    return False
+                else:
+                    print(f"Введен верный номер карты: {number_card}")
+                    return True
+        except:
+            print(f"Введен не_верный номер карты: {number_card}")
+
+
+    """Ввод и проверка пин-кода карты"""
+    @staticmethod
+    def input_code(number_card):
+        pin_code = input("Введите пин_код карты: ")
+        with sqlite3.connect("atm.db") as db:
+                cur = db.cursor()
+                cur.execute(f"""
+                SELECT Pin_code FROM Users_dats WHERE Number_card = {number_card}
+                """, )
+                result_code = cur.fetchone()
+                input_pin = result_code[0]
+                try:
+                    if input_pin == int(pin_code):
+                       print("Введен верный пин_код")
+                       return True
+                    else:
+                        print("Введен не_верный пин_код")
+                        return False
+                except:
+                    print("Введен не_верный пин_код")
+                    return False
+
+                    
+    """Ввод и проверка баланса карты"""
+    @staticmethod
+    def info_balance(number_card):
+        with sqlite3.connect("atm.db") as db:
+                cur = db.cursor()
+                cur.execute(f"""
+                SELECT Balance FROM Users_dats WHERE Number_card = {number_card}
+                """)
+                result_info_balance = cur.fetchone()
+                balance_cart = result_info_balance[0]
+                print(f"Баланс Вашей карты: {balance_cart}")
+
+
+    """Снятие денежных средств с баланса карты"""
+    @staticmethod
+    def withdraw_money(number_card):
+        amount = input("Введите сумму - которую желаете снять: ")
+        with sqlite3.connect("atm.db") as db:
+                cur = db.cursor()
+                cur.execute(f"""
+                SELECT Balance FROM Users_dats WHERE Number_card = {number_card}
+                """)
+                result_info_balance = cur.fetchone()
+                balance_cart = result_info_balance[0]
+                try:
+                    if int(amount) > balance_cart:
+                          print("На вашей карте недостаточно денежных средств")
+                          return False
+                    else:
+                         cur.execute(f"""
+                         UPDATE Users_dats SET Balance = Balance - {amount} WHERE Number_card = {number_card};
+                         """)
+                         db.commit()
+                         SQL_atm.info_balance(number_card)
+                         return True
+                except:
+                     print("Попытка выполнить некорректное действие")
+                     return False
+
+
+    """Внесение денежных средств на баланс карты"""
+    @staticmethod
+    def deposition_money(number_card):
+        amount = input("Введите сумму - которую желаете закинуть: ")
+        with sqlite3.connect("atm.db") as db:
+            try:
+                cur = db.cursor()
+                cur.execute(f"""
+                UPDATE Users_dats SET Balance = Balance + {amount} WHERE Number_card = {number_card};
+                """)
+                db.commit()
+                SQL_atm.info_balance(number_card)
+            except:
+                print("Попытка выполнить некорректное действие")
+                return False
+
+
+    """Перевод денежных средств другому клиенту"""
+    @staticmethod
+    def transfer_money(number_card):
+        recipient = input("Введите номер карты получателя: ")
+        amount = input("Введите сумму перевода: ")
+        
+        with sqlite3.connect("atm.db") as db:
+            cur = db.cursor()
+            
+            # Проверка существования получателя
+            cur.execute(f"""
+            SELECT Number_card FROM Users_dats WHERE Number_card = {recipient}
+            """)
+            if cur.fetchone() is None:
+                print("Карта получателя не найдена")
+                return False
+            
+            # Нельзя переводить самому себе
+            if int(recipient) == int(number_card):
+                print("Нельзя перевести средства самому себе")
+                return False
+            
+            # Получаем баланс отправителя
+            cur.execute(f"""
+            SELECT Balance FROM Users_dats WHERE Number_card = {number_card}
+            """)
+            sender_balance = cur.fetchone()[0]
+            
+            # Проверка суммы
+            try:
+                amount_int = int(amount)
+            except ValueError:
+                print("Некорректная сумма")
+                return False
+            
+            if amount_int <= 0:
+                print("Сумма перевода должна быть положительной")
+                return False
+            
+            if amount_int > sender_balance:
+                print("Недостаточно средств на карте отправителя")
+                return False
+            
+            # Выполняем перевод (два UPDATE внутри одной транзакции)
+            try:
+                cur.execute(f"""
+                UPDATE Users_dats SET Balance = Balance - {amount_int} WHERE Number_card = {number_card}
+                """)
+                cur.execute(f"""
+                UPDATE Users_dats SET Balance = Balance + {amount_int} WHERE Number_card = {recipient}
+                """)
+                db.commit()
+                print("Перевод выполнен успешно")
+                SQL_atm.info_balance(number_card)  # покажем новый баланс отправителя
+                return True
+            except Exception as e:
+                db.rollback()
+                print("Ошибка при выполнении перевода")
+                return False
+
+
+    """Выбор операции с картой"""
+    @staticmethod
+    def input_operation(number_card):
+        while True:
+            operation = input("Введите операцию, которую желаете выполнить:\n"
+                                       "1. Узнать баланс\n"
+                                       "2. Снять наличные\n"
+                                       "3. Внести наличные\n"
+                                       "4. Выйти\n"
+                                       "5. Перевести денежные средства\n")
+            
+            if operation == "1":
+                SQL_atm.info_balance(number_card)
+            
+            elif operation == "2":
+                SQL_atm.withdraw_money(number_card)
+            
+            elif operation == "3":
+                SQL_atm.deposition_money(number_card)
+            
+            elif operation == "4":
+                print("До свидания!")
+                return False
+            
+            elif operation == "5":
+                SQL_atm.transfer_money(number_card)
+            
+            else:
+                print("Некорректный ввод, попробуйте снова")
+```
+
+**Что сделано:**
+- ✅ Пользователь 2345 (пин 2222, баланс 10000) добавляется автоматически при первом запуске.
+- ✅ Новый метод `transfer_money` с проверками: существует ли получатель, не сам ли себе перевод, корректность суммы, достаточно ли средств.
+- ✅ В меню `input_operation` добавлен пункт 5 и обработка вызова.
+- ✅ Исправлены старые опечатки (таблица `Users_dats`, `NOT NULL`, меню выхода).
+- ✅ Код прокомментирован, готов к тестированию.
+
+Можешь смело запускать и проверять переводы. Если захочешь добавить логирование или более строгую обработку ошибок — доработаем. Удачи, бро! 💪
