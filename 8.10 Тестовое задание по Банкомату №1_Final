@@ -8,13 +8,15 @@ class ATM:
     
     def atm_logic(self):
         SQL_atm.create_table()
+        SQL_atm.insert_users((1234, 1111, 10000))
+        SQL_atm.insert_users((2345, 2222, 10000))
         
-        # Создаём тестового пользователя (если ещё нет)
-        # Чтобы избежать ошибки при повторном запуске, обернём в try-except
-        try:
-            SQL_atm.insert_users((2345, 2222, 10000))
-        except:
-            pass  # пользователь уже есть
+        # # Создаём тестового пользователя (если ещё нет)
+        # # Чтобы избежать ошибки при повторном запуске, обернём в try-except
+        # try:
+        #     SQL_atm.insert_users((2345, 2222, 10000))
+        # except:
+        #     pass  # пользователь уже есть
         
         number_card = input("Введите номер карты: ")
 
@@ -54,12 +56,22 @@ class SQL_atm:
     """Создание нового пользователя"""
     @staticmethod
     def insert_users(data_users):
+        # Добавление нового пользователя, если его ещё нет в базе
+        number_card = data_users[0]  # берём номер карты из кортежа
         with sqlite3.connect("atm.db") as db:
             cur = db.cursor()
+            # Проверяем, существует ли уже такая карта
+            cur.execute(f"SELECT Number_card FROM Users_dats WHERE Number_card = {number_card}")
+            existing = cur.fetchone()
+            if existing is not None:
+                print(f"Пользователь с картой {number_card} уже существует. Пропускаем добавление.")
+                return False  # выходим, дубль не создаём
+            # Если не найден, добавляем
             cur.execute("""
             INSERT INTO Users_dats (Number_card, Pin_code, Balance) VALUES (?,?,?);
             """, data_users)
-            print("Создание таблицы Users_data")
+            print("Пользователь успешно добавлен")
+            return True
 
 
     """Ввод и проверка карты"""
