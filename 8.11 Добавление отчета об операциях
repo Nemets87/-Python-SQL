@@ -10,7 +10,7 @@ class ATM:
         SQL_atm.create_table()
         SQL_atm.insert_users((1234, 1111, 10000))
         SQL_atm.insert_users((2345, 2222, 10000))
-        SQL_atm.report_operation_1()    
+        # SQL_atm.report_operation_1()    
         
         # # Создаём тестового пользователя (если ещё нет)
         # # Чтобы избежать ошибки при повторном запуске, обернём в try-except
@@ -33,10 +33,16 @@ class ATM:
 
 start = ATM()
 start.atm_logic()
+
+--------------------------------------
 --------------------------------------
 # sql_querry.py
 import csv
+import datetime
 import sqlite3
+
+now_date = datetime.datetime.now().strftime("%d.%m.%Y")
+
 
 class SQL_atm:
 
@@ -154,6 +160,7 @@ class SQL_atm:
                          """)
                          db.commit()
                          SQL_atm.info_balance(number_card)
+                         SQL_atm.report_operation_1(now_date, number_card, "1", amount, "")
                          return True
                 except:
                      print("Попытка выполнить некорректное действие")
@@ -172,6 +179,7 @@ class SQL_atm:
                 """)
                 db.commit()
                 SQL_atm.info_balance(number_card)
+                SQL_atm.report_operation_1(now_date, number_card, "2", amount, "")
             except:
                 print("Попытка выполнить некорректное действие")
                 return False
@@ -282,10 +290,11 @@ class SQL_atm:
 
     """Отчет об операциях"""
     @staticmethod
-    def report_operation_1():
+    def report_operation_1(now_date, number_card, type_operation, amount, payee):
         # now_date, number_card, type_operation, amount, payee
+        # "Data", "Number_card", "Type_operation", "Amount", "Payee"
         user_data = [
-            ("Data", "Number_card", "Type_operation", "Amount", "Payee")
+            (now_date, number_card, type_operation, amount, payee)
         ]
 
         with open("report_1.csv", "a", newline='') as file:
@@ -294,10 +303,22 @@ class SQL_atm:
                 user_data
             )
         print("Данные внесены в отчет")
+
+"""
+Type_operation
+
+1 - Снятие денежных средств
+2 - Пополнение счета
+3 - Перевод денежных средств
+
+"""
+
+
+
+             
+                                            
+                            
         
-
-
-
              
                                             
                             
