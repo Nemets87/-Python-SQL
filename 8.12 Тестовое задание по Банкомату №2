@@ -1,0 +1,358 @@
+8.12 Тестовое задание по Банкомату №2
+-------------------------------------
+
+Бро, разберём задание по шагам! Сейчас мы добавим отчётность для переводов. В твоём коде уже есть метод `report_operation_1`, который пишет операции в `report_1.csv`. Нужно:
+
+1. В методе `transfer_money` после успешного перевода вызвать `report_operation_1` с типом операции `3`.
+2. Создать новый файл `report_2.csv` с полями `Date, Payee, Type operation, Amount, Sender` (специально для переводов).
+3. Добавить новый метод `report_operation_2`, который будет дописывать в `report_2.csv` информацию о переводе.
+4. Вызвать `report_operation_2` также в `transfer_money`.
+5. Добавить проверки и сообщения об успехе/ошибках.
+
+---
+
+## 🧩 Что изменим в файле `sql_querry.py`
+
+### 📄 Добавим метод `report_operation_2`
+
+Метод будет принимать:
+- `now_date` – дата операции (уже есть глобальная `now_date`)
+- `payee` – получатель (номер карты получателя)
+- `type_operation` – всегда `3` для переводов
+- `amount` – сумма перевода
+- `sender` – отправитель (номер карты отправителя)
+
+Он должен записывать строку в `report_2.csv`, а при первом создании файла добавить заголовки.
+
+### 🖊️ Модифицируем `report_operation_1` для надёжности
+
+Добавим `try-except` и вывод сообщений, как требует задание.
+
+### 🔄 В методе `transfer_money` после успешного перевода вызовем оба отчёта
+
+---
+
+## 📝 Полный код с комментариями (только `sql_querry.py`, так как `atm.py` менять не нужно)
+
+```python
+# sql_querry.py
+import csv
+import datetime
+import sqlite3
+import os  # понадобится для проверки существования файла
+
+now_date = datetime.datetime.now().strftime("%d.%m.%Y")
+
+class SQL_atm:
+
+    """Создание таблицы Users_data"""
+    @staticmethod
+    def create_table():
+        with sqlite3.connect("atm.db") as db:
+            cur = db.cursor()
+            cur.execute("""
+            CREATE TABLE IF NOT EXISTS Users_dats(
+            UserID INTEGER PRIMARY KEY AUTOINCREMENT,
+            Number_card INTEGER NOT NULL UNIQUE,
+            Pin_code INTEGER NOT NULL,
+            Balance INTEGER NOT NULL);
+            """)
+            print("Создание таблицы Users_data")
+
+
+    """Создание нового пользователя"""
+    @staticmethod
+    def insert_users(data_users):
+        # Добавление нового пользователя, если его ещё нет в базе
+        number_card = data_users[0]  # берём номер карты из кортежа
+        with sqlite3.connect("atm.db") as db:
+            cur = db.cursor()
+            # Проверяем, существует ли уже такая карта
+            cur.execute(f"SELECT Number_card FROM Users_dats WHERE Number_card = {number_card}")
+            existing = cur.fetchone()
+            if existing is not None:
+                print(f"Пользователь с картой {number_card} уже существует. Пропускаем добавление.")
+                return False  # выходим, дубль не создаём
+            # Если не найден, добавляем
+            cur.execute("""
+            INSERT INTO Users_dats (Number_card, Pin_code, Balance) VALUES (?,?,?);
+            """, data_users)
+            print("Пользователь успешно добавлен")
+            return True
+
+
+    """Ввод и проверка карты"""
+    @staticmethod
+    def input_card(number_card):
+        try:
+            with sqlite3.connect("atm.db") as db:
+                cur = db.cursor()
+                cur.execute(f"""
+                SELECT Number_card FROM Users_dats WHERE Number_card = {number_card}
+                """, )
+                result_card = cur.fetchone()
+                print("Ввод и проверка карты")
+                if result_card == None:
+                    print("Введен неизвестный номер карты")
+                    return False
+                else:
+                    print(f"Введен верный номер карты: {number_card}")
+                    return True
+        except:
+            print(f"Введен не_верный номер карты: {number_card}")
+
+
+    """Ввод и проверка пин-кода карты"""
+    @staticmethod
+    def input_code(number_card):
+        pin_code = input("Введите пин_код карты: ")
+        with sqlite3.connect("atm.db") as db:
+                cur = db.cursor()
+                cur.execute(f"""
+                SELECT Pin_code FROM Users_dats WHERE Number_card = {number_card}
+                """, )
+                result_code = cur.fetchone()
+                input_pin = result_code[0]
+                try:
+                    if input_pin == int(pin_code):
+                       print("Введен верный пин_код")
+                       return True
+                    else:
+                        print("Введен не_верный пин_код")
+                        return False
+                except:
+                    print("Введен не_верный пин_код")
+                    return False
+
+
+    """Ввод и проверка баланса карты"""
+    @staticmethod
+    def info_balance(number_card):
+        with sqlite3.connect("atm.db") as db:
+                cur = db.cursor()
+                cur.execute(f"""
+                SELECT Balance FROM Users_dats WHERE Number_card = {number_card}
+                """)
+                result_info_balance = cur.fetchone()
+                balance_cart = result_info_balance[0]
+                print(f"Баланс Вашей карты: {balance_cart}")
+
+
+    """Снятие денежных средств с баланса карты"""
+    @staticmethod
+    def withdraw_money(number_card):
+        amount = input("Введите сумму - которую желаете снять: ")
+        with sqlite3.connect("atm.db") as db:
+                cur = db.cursor()
+                cur.execute(f"""
+                SELECT Balance FROM Users_dats WHERE Number_card = {number_card}
+                """)
+                result_info_balance = cur.fetchone()
+                balance_cart = result_info_balance[0]
+                try:
+                    if int(amount) > balance_cart:
+                          print("На вашей карте недостаточно денежных средств")
+                          return False
+                    else:
+                         cur.execute(f"""
+                         UPDATE Users_dats SET Balance = Balance - {amount} WHERE Number_card = {number_card};
+                         """)
+                         db.commit()
+                         SQL_atm.info_balance(number_card)
+                         # Записываем операцию в отчёт (тип 1 - снятие)
+                         SQL_atm.report_operation_1(now_date, number_card, "1", amount, "")
+                         return True
+                except:
+                     print("Попытка выполнить некорректное действие")
+                     return False
+
+
+    """Внесение денежных средств на баланс карты"""
+    @staticmethod
+    def deposition_money(number_card):
+        amount = input("Введите сумму - которую желаете закинуть: ")
+        with sqlite3.connect("atm.db") as db:
+            try:
+                cur = db.cursor()
+                cur.execute(f"""
+                UPDATE Users_dats SET Balance = Balance + {amount} WHERE Number_card = {number_card};
+                """)
+                db.commit()
+                SQL_atm.info_balance(number_card)
+                # Записываем операцию в отчёт (тип 2 - пополнение)
+                SQL_atm.report_operation_1(now_date, number_card, "2", amount, "")
+            except:
+                print("Попытка выполнить некорректное действие")
+                return False
+
+
+    """Перевод денежных средств другому клиенту"""
+    @staticmethod
+    def transfer_money(number_card):
+        # recipient —  строка (например, "3456"), в которой хранится номер карты получателя.
+        recipient = input("Введите номер карты получателя: ")
+        # input() всегда возвращает строку, поэтому позже нам придётся преобразовывать её в число (int).
+        amount = input("Введите сумму перевода: ") 
+        
+        with sqlite3.connect("atm.db") as db:
+            cur = db.cursor()
+            
+            # Проверка существования получателя
+            cur.execute(f"""
+            SELECT Number_card FROM Users_dats WHERE Number_card = {recipient}
+            """)
+            # Важно ! cur.fetchone() — получить одну строку результата.
+            # Если такой номер карты есть, вернётся кортеж с одним элементом, например (3456,).
+            if cur.fetchone() is None: # Проверяем. Если None, значит карты получателя не существует.
+                print("Карта получателя не найдена")
+                return False
+            
+            # Нельзя переводить самому себе
+            if int(recipient) == int(number_card):
+                print("Нельзя перевести средства самому себе")
+                return False
+            
+            # Получаем баланс отправителя
+            cur.execute(f"""
+            SELECT Balance FROM Users_dats WHERE Number_card = {number_card}
+            """)
+            sender_balance = cur.fetchone()[0] # получаем само число (баланс)
+            
+            # Проверка суммы
+            try:
+                amount_int = int(amount)
+            except ValueError:
+                print("Некорректная сумма")
+                return False
+            
+            if amount_int <= 0:
+                print("Сумма перевода должна быть положительной")
+                return False
+            
+            if amount_int > sender_balance:
+                print("Недостаточно средств на карте отправителя")
+                return False
+            
+            # Выполняем перевод (два UPDATE внутри одной транзакции)
+            try:
+                # Списание у отправителя
+                cur.execute(f"""
+                UPDATE Users_dats SET Balance = Balance - {amount_int} WHERE Number_card = {number_card}
+                """)
+                # Зачисление получателю
+                cur.execute(f"""
+                UPDATE Users_dats SET Balance = Balance + {amount_int} WHERE Number_card = {recipient}
+                """)
+                db.commit()
+                print("Перевод выполнен успешно")
+                SQL_atm.info_balance(number_card)  # покажем новый баланс отправителя
+                
+                # ======== ВАЖНО: фиксируем операцию в отчётах ========
+                # Универсальный отчёт (тип операции 3 - перевод)
+                SQL_atm.report_operation_1(now_date, number_card, "3", amount_int, recipient)
+                # Специализированный отчёт для переводов
+                SQL_atm.report_operation_2(now_date, recipient, "3", amount_int, number_card)
+                # =================================================
+                
+                return True
+            except Exception as e:
+                # Если ошибка — откатываем изменения
+                db.rollback()
+                print("Ошибка при выполнении перевода")
+                return False
+
+
+    """Выбор операции с картой"""
+    @staticmethod
+    def input_operation(number_card):
+        while True:
+            operation = input("Введите операцию, которую желаете выполнить:\n"
+                                       "1. Узнать баланс\n"
+                                       "2. Снять наличные\n"
+                                       "3. Внести наличные\n"
+                                       "4. Выйти\n"
+                                       "5. Перевести денежные средства\n")
+            
+            if operation == "1":
+                SQL_atm.info_balance(number_card)
+            
+            elif operation == "2":
+                SQL_atm.withdraw_money(number_card)
+            
+            elif operation == "3":
+                SQL_atm.deposition_money(number_card)
+            
+            elif operation == "4":
+                print("До свидания!")
+                return False
+            
+            elif operation == "5":
+                SQL_atm.transfer_money(number_card)
+            
+            else:
+                print("Некорректный ввод, попробуйте снова")
+
+
+    """Отчет об операциях (универсальный, для всех типов)"""
+    @staticmethod
+    def report_operation_1(now_date, number_card, type_operation, amount, payee):
+        # Поля: "Data", "Number_card", "Type_operation", "Amount", "Payee"
+        user_data = [
+            (now_date, number_card, type_operation, amount, payee)
+        ]
+        try:
+            with open("report_1.csv", "a", newline='') as file:
+                writer = csv.writer(file, delimiter=";")
+                writer.writerows(user_data)
+            print("Данные внесены в отчёт report_1.csv")
+            return True
+        except Exception as e:
+            print(f"Ошибка записи в report_1.csv: {e}")
+            return False
+
+
+    """Отчет об операциях перевода (специализированный, для перевода)"""
+    @staticmethod
+    def report_operation_2(now_date, payee, type_operation, amount, sender):
+        # Поля: "Date", "Payee", "Type operation", "Amount", "Sender"
+        data = [now_date, payee, type_operation, amount, sender]
+
+        # Проверяем, существует ли файл, чтобы при первом обращении добавить заголовки
+        file_exists = os.path.exists("report_2.csv")
+
+        try:
+            with open("report_2.csv", "a", newline='') as file:
+                writer = csv.writer(file, delimiter=";")
+                # Если файл только создаётся, пишем заголовки
+                if not file_exists:
+                    writer.writerow(["Date", "Payee", "Type operation", "Amount", "Sender"])
+                writer.writerow(data)
+            print("Данные внесены в отчёт report_2.csv")
+            return True
+        except Exception as e:
+            print(f"Ошибка записи в report_2.csv: {e}")
+            return False
+```
+
+---
+
+## 🎯 Что мы сделали
+
+1. ✅ В `transfer_money` добавили вызов `report_operation_1` с типом `3`.
+2. ✅ Добавили новый метод `report_operation_2`, создающий и дописывающий `report_2.csv` с нужными полями.
+3. ✅ Вызвали `report_operation_2` после успешного перевода.
+4. ✅ Добавили проверку на существование файла (заголовки пишутся только при создании).
+5. ✅ Все записи в CSV обёрнуты в `try-except` с выводом сообщений об успехе или ошибке.
+
+---
+
+## 🧪 Как протестировать
+
+1. Запусти `atm.py`.
+2. Введи карту `1234`, пин `1111`.
+3. Выбери операцию `5` (перевод).
+4. Введи карту получателя `2345`, сумму, например, `500`.
+5. После успешного перевода проверь, что в папке появились файлы `report_1.csv` и `report_2.csv`.
+6. Открой `report_2.csv` — там должна быть строка с датой, получателем (`2345`), типом (`3`), суммой (`500`) и отправителем (`1234`).
+
+Если будут вопросы — я рядом 😊
