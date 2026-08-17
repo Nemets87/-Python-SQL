@@ -1,0 +1,130 @@
+8.13 Тестовое задание по Python + SQL №3
+------------------------------------------
+
+Бро, вот готовый код для нового задания. Он полностью соответствует требованиям: названия базы данных, таблиц, колонок и отчета совпадают с условием, есть все необходимые проверки, вывод сообщений и комментарии.
+
+```python
+import sqlite3
+
+# Функция для подключения к базе данных
+def get_connection():
+    return sqlite3.connect("mobile.db")
+
+# Функция для создания таблиц
+def create_tables():
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        # Создание таблицы mobile_users
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS mobile_users (
+                UserID INTEGER PRIMARY KEY AUTOINCREMENT,
+                User_name TEXT,
+                Balance INTEGER,
+                Mobile_tariff_ref INTEGER,
+                Activity TEXT
+            )
+        """)
+        # Создание таблицы mobile_tariff
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS mobile_tariff (
+                TariffID INTEGER PRIMARY KEY,
+                Tariff TEXT,
+                Price INTEGER
+            )
+        """)
+        conn.commit()
+    print("Таблицы созданы или уже существуют.")
+
+# Функция для заполнения таблиц начальными данными, если они пустые
+def initialize_data():
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        # Проверка mobile_tariff
+        cursor.execute("SELECT COUNT(*) FROM mobile_tariff")
+        if cursor.fetchone()[0] == 0:
+            tariffs = [
+                (1, "Standard", 500),
+                (2, "VIP", 1000),
+                (3, "Premium", 1500)
+            ]
+            cursor.executemany("INSERT INTO mobile_tariff (TariffID, Tariff, Price) VALUES (?, ?, ?)", tariffs)
+            print("Тарифы добавлены.")
+        else:
+            print("Тарифы уже существуют, пропускаем заполнение.")
+        
+        # Проверка mobile_users
+        cursor.execute("SELECT COUNT(*) FROM mobile_users")
+        if cursor.fetchone()[0] == 0:
+            users = [
+                ("User1", 10000, 2, "Yes"),
+                ("User2", 10000, 3, "Yes"),
+                ("User3", 10000, 1, "Yes")
+            ]
+            cursor.executemany("INSERT INTO mobile_users (User_name, Balance, Mobile_tariff_ref, Activity) VALUES (?, ?, ?, ?)", users)
+            print("Пользователи добавлены.")
+        else:
+            print("Пользователи уже существуют, пропускаем заполнение.")
+        conn.commit()
+
+# Функция для получения периода расчета (с проверкой ввода)
+def get_period():
+    while True:
+        try:
+            months = int(input("Введите период расчета: "))
+            if months <= 0:
+                print("Ошибка: период должен быть положительным целым числом.")
+                continue
+            return months
+        except ValueError:
+            print("Ошибка: введите целое число.")
+
+# Функция для проведения ежемесячного списания
+def process_monthly_charges(months):
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        for month in range(1, months + 1):
+            # Получаем всех активных пользователей (Activity = 'Yes')
+            cursor.execute("""
+                SELECT u.UserID, u.User_name, u.Balance, t.Price
+                FROM mobile_users u
+                JOIN mobile_tariff t ON u.Mobile_tariff_ref = t.TariffID
+                WHERE u.Activity = 'Yes'
+            """)
+            active_users = cursor.fetchall()
+            for user in active_users:
+                user_id, name, balance, price = user
+                if balance >= price:
+                    # Баланс достаточен — списываем
+                    new_balance = balance - price
+                    cursor.execute("UPDATE mobile_users SET Balance = ? WHERE UserID = ?", (new_balance, user_id))
+                    print(f"{name} снятие денежных средств {price} за месяц №{month}")
+                else:
+                    # Недостаточно средств — блокируем пользователя
+                    cursor.execute("UPDATE mobile_users SET Activity = 'No' WHERE UserID = ?", (user_id,))
+                    print(f"{name} недостаточно средств на балансе")
+            # Фиксируем изменения после каждого месяца
+            conn.commit()
+
+def main():
+    print("Запуск программы мобильного оператора.")
+    create_tables()
+    initialize_data()
+    months = get_period()
+    print(f"Начинаем расчет за {months} мес.")
+    process_monthly_charges(months)
+    print("Расчет завершен.")
+
+if __name__ == "__main__":
+    main()
+```
+
+## Пояснения
+
+- **База данных и таблицы**: создаются `mobile.db`, `mobile_users` и `mobile_tariff` с точными именами колонок из задания.
+- **Заполнение**: тарифы и пользователи добавляются только если таблицы пустые, чтобы при повторном запуске не было дублей.
+- **Ввод периода**: строка `"Введите период расчета: "` идёт через `input()`, проверяется, что это положительное целое число.
+- **Логика списания**: каждый месяц выбираются пользователи с `Activity = 'Yes'`, для них проверяется баланс. Если хватает — списывается тариф и выводится сообщение об успехе. Если нет — `Activity` меняется на `No` и выводится сообщение о недостатке средств. Пользователь с `No` в следующих месяцах не участвует.
+- **Безопасность**: баланс не уходит в минус, так как проверка `balance >= price` выполняется перед обновлением.
+- **Вывод**: сообщения соответствуют примеру из задания.
+
+Код готов к запуску и проверке. Удачи! 🚀
