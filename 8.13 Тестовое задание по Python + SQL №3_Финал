@@ -1,0 +1,150 @@
+8.13 Тестовое задание по Python + SQL №3_Финал
+----------------------------------------------
+
+import sqlite3
+# Функция для подключения к базе данных
+# функция возвращает объект соединения с базой данных mobile.db.
+# Если файла mobile.db не существует, SQLite автоматически создаст его при первом подключении.
+# Каждый вызов get_connection() открывает новое соединение,
+# но мы будем использовать контекстный менеджер with, чтобы оно автоматически закрывалось.
+def get_connection():
+    return sqlite3.connect("mobile.db")
+
+# Функция для создания таблиц
+def create_tables():
+    # открываем соединение, оно будет автоматически закрыто после выхода из блока with (даже если произойдёт ошибка).
+    # Это гарантирует корректное завершение работы с базой.
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        # Создание таблицы mobile_users == информация о пользователях, их балансе, тарифе и активности.
+        # Заполняем таблицы начальными данными, если они пустые (проверяем количество записей).
+        # Это нужно, чтобы при повторном запуске не было дублей.
+        # AUTOINCREMENT – первичный ключ, уникальный идентификатор, автоматически увеличивается == защита от дубля !
+        # Mobile_tariff_ref INTEGER – ссылка на тариф (внешний ключ не объявлен, но по логике это ID тарифа из таблицы mobile_tariff).
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS mobile_users (
+                UserID INTEGER PRIMARY KEY AUTOINCREMENT,
+                User_name TEXT,
+                Balance INTEGER,
+                Mobile_tariff_ref INTEGER,
+                Activity TEXT
+            )
+        """)
+        # Создание таблицы mobile_tariff == список тарифов с ценами.
+        # TariffID INTEGER PRIMARY KEY – первичный ключ.
+        # conn.commit() – фиксируем изменения (сохраняем создание таблиц).
+        # в SQLite DDL-операции (CREATE) автоматически коммитятся, но явный commit не повредит.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS mobile_tariff (
+                TariffID INTEGER PRIMARY KEY,
+                Tariff TEXT,
+                Price INTEGER
+            )
+        """)
+        conn.commit()
+    print("Таблицы созданы или уже существуют.")
+
+# Функция для заполнения таблиц начальными данными, если они пустые
+def initialize_data():
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        # Проверка mobile_tariff
+        # запрос количества строк в таблице тарифов.
+        cursor.execute("SELECT COUNT(*) FROM mobile_tariff")
+        # cursor.fetchone() – получаем первую строку результата [0] – берём этот элемент на карандашик.
+        if cursor.fetchone()[0] == 0:
+            # Если количество равно 0, таблица пустая, значит, нужно добавить тарифы.
+            tariffs = [
+                (1, "Standard", 500),
+                (2, "VIP", 1000),
+                (3, "Premium", 1500)
+            ]
+            # не забываем предохраняться от инекций SQL (триппер не пройдет !)
+            cursor.executemany("INSERT INTO mobile_tariff (TariffID, Tariff, Price) VALUES (?, ?, ?)", tariffs)
+            print("Тарифы добавлены.")
+        else:
+            print("Тарифы уже существуют, пропускаем заполнение.")
+        
+        # Проверка mobile_users
+        cursor.execute("SELECT COUNT(*) FROM mobile_users")
+        if cursor.fetchone()[0] == 0:
+            users = [
+                ("User1", 10000, 2, "Yes"),
+                ("User2", 10000, 3, "Yes"),
+                ("User3", 10000, 1, "Yes")
+            ]
+            # поле UserID не указано, оно автоинкрементное, SQLite сам его назначит.
+            # не забываем предохраняться от инекций SQL (тут через ???? + use == все красиво)
+            cursor.executemany("INSERT INTO mobile_users (User_name, Balance, Mobile_tariff_ref, Activity) VALUES (?, ?, ?, ?)", users)
+            print("Пользователи добавлены.")
+        else:
+            print("Пользователи уже существуют, пропускаем заполнение.")
+        conn.commit()
+        # фиксим изменения.
+        # При повторных запусках, если таблицы уже заполнены, мы пропускаем вставку.
+
+# Функция для получения периода расчета (с проверкой ввода)
+def get_period():
+    # бесконечный цикл, который продолжается, пока не будет получено корректное значение.
+    while True:
+        try:
+            # Сверка, что введено положительное целое число.
+            months = int(input("Введите период расчета: "))
+            if months <= 0:
+                print("Ошибка: период должен быть положительным целым числом.")
+                continue
+            # Если число положительное, возвращаем его (return months).
+            return months
+        # Если преобразование не удалось (пользователь ввёл не число, например #ab!c%),
+        # возникает исключение ValueError, которое перехватывается в except.
+        except ValueError:
+            print("Ошибка: введите целое число.")
+
+# Функция для проведения ежемесячного списания
+# Это основная функция, выполняющая списание средств.
+def process_monthly_charges(months):
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        for month in range(1, months + 1):
+            # Получаем всех активных пользователей (Activity = 'Yes')
+            # выполняем SQL-запрос, который объединяет таблицы mobile_users и mobile_tariff по полю тарифа:
+            # JOIN связывает каждую запись пользователя с его тарифом (по Mobile_tariff_ref = TariffID
+            # Выбираем ID пользователя, имя, баланс и цену тарифа.
+            cursor.execute("""
+                SELECT u.UserID, u.User_name, u.Balance, t.Price
+                FROM mobile_users u
+                JOIN mobile_tariff t ON u.Mobile_tariff_ref = t.TariffID
+                WHERE u.Activity = 'Yes'
+            """)
+            active_users = cursor.fetchall()
+            for user in active_users:
+                user_id, name, balance, price = user
+                # Проверяем, хватает ли баланса на списание тарифа.
+                if balance >= price: 
+                    # Баланс достаточен — списываем 
+                    new_balance = balance - price
+                    cursor.execute("UPDATE mobile_users SET Balance = ? WHERE UserID = ?", (new_balance, user_id))
+                    print(f"{name} снятие денежных средств {price} за месяц №{month}")
+                else:
+                    # Недостаточно средств — блокируем пользователя
+                    cursor.execute("UPDATE mobile_users SET Activity = 'No' WHERE UserID = ?", (user_id,))
+                    print(f"{name} недостаточно средств на балансе")
+            # Фиксируем изменения после каждого месяца
+            conn.commit()
+
+def main():
+    print("Запуск программы мобильного оператора.")
+    # create_tables() – создаём таблицы, если их нет.
+    create_tables()
+    # initialize_data() – заполняем таблицы, если пустые.
+    initialize_data()
+    # months = get_period() – получаем от пользователя количество месяцев.
+    months = get_period()
+    print(f"Начинаем расчет за {months} мес.")
+    # process_monthly_charges(months) – выполняем расчёт списаний.
+    process_monthly_charges(months)
+    print("Расчет завершен.")
+# код внутри выполнится только если файл запущен напрямую, а не импортирован как модуль.
+if __name__ == "__main__":
+    main()
+    # вызывает главную функцию.
