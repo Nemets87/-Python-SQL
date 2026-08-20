@@ -1,0 +1,449 @@
+8.14 Тестовое задание по Python + SQL №4
+----------------------------------------
+
+Бро, привет! Отличное новое задание — мобильные звонки. Я подготовил подробное решение с комментариями и объяснениями, как ты просил. Сначала дам код, потом разберу каждую часть, чтобы ты мог спокойно объяснить студентам. Проверил логику — всё должно работать корректно.
+
+---
+
+## 1. Полный код решения
+
+```python
+import sqlite3
+import random
+import csv
+import os
+from datetime import datetime, timedelta
+
+class MobileCalls:
+    def __init__(self, db_name="mobile_calls.db"):
+        """Инициализация: подключение к базе данных и создание курсора."""
+        self.conn = sqlite3.connect(db_name)
+        self.cursor = self.conn.cursor()
+        self.create_tables()
+        self.fill_initial_data()
+        # Список операторов и их цены будем загружать один раз
+        self.operators = self.load_operators()
+        self.start_date = datetime.now().date()
+
+    def create_tables(self):
+        """Создание таблиц mobile_users и mobile_price, если их нет."""
+        self.cursor.execute("""
+            CREATE TABLE IF NOT EXISTS mobile_users (
+                UserID INTEGER PRIMARY KEY,
+                User TEXT,
+                Balance INTEGER
+            )
+        """)
+        self.cursor.execute("""
+            CREATE TABLE IF NOT EXISTS mobile_price (
+                PriceID INTEGER PRIMARY KEY,
+                Mts_Mts INTEGER,
+                Mts_Tele2 INTEGER,
+                Mts_Yota INTEGER
+            )
+        """)
+        self.conn.commit()
+        print("Таблицы созданы или уже существуют.")
+
+    def fill_initial_data(self):
+        """Заполнение таблиц начальными данными, если они пустые."""
+        # Проверяем mobile_users
+        self.cursor.execute("SELECT COUNT(*) FROM mobile_users")
+        if self.cursor.fetchone()[0] == 0:
+            self.cursor.execute(
+                "INSERT INTO mobile_users (UserID, User, Balance) VALUES (?, ?, ?)",
+                (1, "User1", 500)
+            )
+            print("Добавлен пользователь User1 с балансом 500.")
+        else:
+            print("Данные пользователей уже существуют.")
+
+        # Проверяем mobile_price
+        self.cursor.execute("SELECT COUNT(*) FROM mobile_price")
+        if self.cursor.fetchone()[0] == 0:
+            self.cursor.execute(
+                "INSERT INTO mobile_price (PriceID, Mts_Mts, Mts_Tele2, Mts_Yota) VALUES (?, ?, ?, ?)",
+                (1, 1, 2, 3)
+            )
+            print("Добавлены тарифы: Mts_Mts=1, Mts_Tele2=2, Mts_Yota=3.")
+        else:
+            print("Данные тарифов уже существуют.")
+        self.conn.commit()
+
+    def load_operators(self):
+        """Загружает список операторов и их цен из таблицы mobile_price."""
+        self.cursor.execute("SELECT Mts_Mts, Mts_Tele2, Mts_Yota FROM mobile_price WHERE PriceID = 1")
+        row = self.cursor.fetchone()
+        if row:
+            operators = [
+                ("Mts_Mts", row[0]),
+                ("Mts_Tele2", row[1]),
+                ("Mts_Yota", row[2])
+            ]
+            return operators
+        else:
+            print("Ошибка: таблица тарифов пуста!")
+            return []
+
+    def report_operation(self, date_str, operator, minutes, amount):
+        """
+        Записывает успешную операцию в файл report_mobile.csv.
+        Поля: Date, Operator, Count_min, Amount.
+        Если файл не существует, добавляет заголовки.
+        """
+        file_exists = os.path.exists("report_mobile.csv")
+        try:
+            with open("report_mobile.csv", "a", newline='', encoding='utf-8') as file:
+                writer = csv.writer(file, delimiter=";")
+                if not file_exists:
+                    writer.writerow(["Date", "Operator", "Count_min", "Amount"])
+                writer.writerow([date_str, operator, minutes, amount])
+            print(f"Запись в отчёт: {date_str}, {operator}, {minutes} мин, {amount} руб.")
+            return True
+        except Exception as e:
+            print(f"Ошибка записи в report_mobile.csv: {e}")
+            return False
+
+    def make_call(self, day_number):
+        """
+        Выполняет один звонок за день:
+        - случайный выбор оператора и минут
+        - проверка достаточности баланса
+        - списание средств и запись в отчёт при успехе
+        Возвращает True/False.
+        """
+        # Текущая дата для этого дня
+        current_date = self.start_date + timedelta(days=day_number - 1)
+        date_str = current_date.strftime("%d.%m.%Y")
+
+        # Случайный выбор оператора и минут
+        if not self.operators:
+            print("Нет доступных операторов!")
+            return False
+        operator, price_per_min = random.choice(self.operators)
+        minutes = random.randint(1, 10)
+        amount = price_per_min * minutes
+
+        # Получаем текущий баланс пользователя
+        self.cursor.execute("SELECT Balance FROM mobile_users WHERE UserID = 1")
+        result = self.cursor.fetchone()
+        if not result:
+            print("Пользователь не найден!")
+            return False
+        balance = result[0]
+
+        print(f"День {day_number} ({date_str}):")
+        print(f"  Выбран оператор: {operator}, минут: {minutes}, цена минуты: {price_per_min}, сумма: {amount}")
+
+        # Проверка достаточности средств
+        if balance < amount:
+            print(f"  Недостаточно средств! Требуется: {amount}, доступно: {balance}. Звонок не совершён.")
+            return False
+
+        # Списание средств
+        new_balance = balance - amount
+        self.cursor.execute("UPDATE mobile_users SET Balance = ? WHERE UserID = 1", (new_balance,))
+        self.conn.commit()
+        print(f"  Звонок успешен. Новый баланс: {new_balance}")
+
+        # Запись в отчёт
+        self.report_operation(date_str, operator, minutes, amount)
+        return True
+
+    def run_month(self):
+        """Запускает 30 итераций (дней) с ежедневным звонком."""
+        print("Начало месяца (30 дней):")
+        for day in range(1, 31):
+            self.make_call(day)
+            print("-" * 40)
+
+    def close(self):
+        """Закрывает соединение с базой данных."""
+        self.conn.close()
+        print("Соединение с базой данных закрыто.")
+
+if __name__ == "__main__":
+    app = MobileCalls()
+    app.run_month()
+    app.close()
+```
+
+---
+
+## 2. Подробный разбор кода (для объяснения студентам)
+
+### 2.1. Импорты
+
+```python
+import sqlite3
+import random
+import csv
+import os
+from datetime import datetime, timedelta
+```
+
+- `sqlite3` – работа с SQLite.
+- `random` – случайный выбор оператора и минут.
+- `csv` – запись в CSV-файл.
+- `os` – проверка существования файла отчёта.
+- `datetime` и `timedelta` – работа с датами для имитации каждого дня месяца.
+
+### 2.2. Класс `MobileCalls` и конструктор `__init__`
+
+```python
+def __init__(self, db_name="mobile_calls.db"):
+    self.conn = sqlite3.connect(db_name)
+    self.cursor = self.conn.cursor()
+    self.create_tables()
+    self.fill_initial_data()
+    self.operators = self.load_operators()
+    self.start_date = datetime.now().date()
+```
+
+- Подключаемся к базе данных `mobile_calls.db` (если файла нет – он создастся).
+- Создаём курсор для выполнения SQL-запросов.
+- Вызываем методы создания таблиц и заполнения начальными данными.
+- Загружаем список операторов из таблицы тарифов в память (чтобы не обращаться к БД каждый раз).
+- Фиксируем дату старта – сегодняшний день, от него будем отсчитывать 30 дней.
+
+### 2.3. Метод `create_tables`
+
+```python
+def create_tables(self):
+    self.cursor.execute("""
+        CREATE TABLE IF NOT EXISTS mobile_users (
+            UserID INTEGER PRIMARY KEY,
+            User TEXT,
+            Balance INTEGER
+        )
+    """)
+    self.cursor.execute("""
+        CREATE TABLE IF NOT EXISTS mobile_price (
+            PriceID INTEGER PRIMARY KEY,
+            Mts_Mts INTEGER,
+            Mts_Tele2 INTEGER,
+            Mts_Yota INTEGER
+        )
+    """)
+    self.conn.commit()
+    print("Таблицы созданы или уже существуют.")
+```
+
+- Создаём таблицу `mobile_users` с колонками:
+  - `UserID INTEGER PRIMARY KEY` – идентификатор пользователя.
+  - `User TEXT` – имя пользователя.
+  - `Balance INTEGER` – баланс.
+- Создаём таблицу `mobile_price` с колонками:
+  - `PriceID INTEGER PRIMARY KEY` – идентификатор тарифа.
+  - `Mts_Mts INTEGER` – цена звонка с МТС на МТС.
+  - `Mts_Tele2 INTEGER` – цена звонка с МТС на Tele2.
+  - `Mts_Yota INTEGER` – цена звонка с МТС на Yota.
+- `IF NOT EXISTS` предотвращает ошибку при повторном запуске.
+- `commit()` фиксирует изменения.
+
+### 2.4. Метод `fill_initial_data`
+
+```python
+def fill_initial_data(self):
+    # Пользователь
+    self.cursor.execute("SELECT COUNT(*) FROM mobile_users")
+    if self.cursor.fetchone()[0] == 0:
+        self.cursor.execute(
+            "INSERT INTO mobile_users (UserID, User, Balance) VALUES (?, ?, ?)",
+            (1, "User1", 500)
+        )
+        print("Добавлен пользователь User1 с балансом 500.")
+    else:
+        print("Данные пользователей уже существуют.")
+
+    # Тарифы
+    self.cursor.execute("SELECT COUNT(*) FROM mobile_price")
+    if self.cursor.fetchone()[0] == 0:
+        self.cursor.execute(
+            "INSERT INTO mobile_price (PriceID, Mts_Mts, Mts_Tele2, Mts_Yota) VALUES (?, ?, ?, ?)",
+            (1, 1, 2, 3)
+        )
+        print("Добавлены тарифы: Mts_Mts=1, Mts_Tele2=2, Mts_Yota=3.")
+    else:
+        print("Данные тарифов уже существуют.")
+    self.conn.commit()
+```
+
+- Проверяем количество записей в каждой таблице.
+- Если таблица пустая – добавляем данные:
+  - Пользователь: `UserID = 1`, `User = "User1"`, `Balance = 500`.
+  - Тариф: `PriceID = 1`, `Mts_Mts = 1`, `Mts_Tele2 = 2`, `Mts_Yota = 3`.
+- Используем параметризованные запросы (`?`) для безопасности.
+- Выводим сообщения о добавлении или пропуске.
+
+### 2.5. Метод `load_operators`
+
+```python
+def load_operators(self):
+    self.cursor.execute("SELECT Mts_Mts, Mts_Tele2, Mts_Yota FROM mobile_price WHERE PriceID = 1")
+    row = self.cursor.fetchone()
+    if row:
+        operators = [
+            ("Mts_Mts", row[0]),
+            ("Mts_Tele2", row[1]),
+            ("Mts_Yota", row[2])
+        ]
+        return operators
+    else:
+        print("Ошибка: таблица тарифов пуста!")
+        return []
+```
+
+- Загружаем строку с тарифами (PriceID = 1).
+- Формируем список кортежей: `(название оператора, цена)`.
+- Возвращаем этот список, чтобы использовать в цикле.
+
+### 2.6. Метод `report_operation`
+
+```python
+def report_operation(self, date_str, operator, minutes, amount):
+    file_exists = os.path.exists("report_mobile.csv")
+    try:
+        with open("report_mobile.csv", "a", newline='', encoding='utf-8') as file:
+            writer = csv.writer(file, delimiter=";")
+            if not file_exists:
+                writer.writerow(["Date", "Operator", "Count_min", "Amount"])
+            writer.writerow([date_str, operator, minutes, amount])
+        print(f"Запись в отчёт: {date_str}, {operator}, {minutes} мин, {amount} руб.")
+        return True
+    except Exception as e:
+        print(f"Ошибка записи в report_mobile.csv: {e}")
+        return False
+```
+
+- Принимает дату, оператора, минуты и сумму.
+- Проверяет, существует ли файл `report_mobile.csv`. Если нет – создаёт его и записывает заголовки: `Date, Operator, Count_min, Amount`.
+- Добавляет строку с данными.
+- Использует разделитель `;` (подходит для Excel).
+- Выводит сообщение об успехе или ошибке.
+
+### 2.7. Метод `make_call` – сердце программы
+
+```python
+def make_call(self, day_number):
+    current_date = self.start_date + timedelta(days=day_number - 1)
+    date_str = current_date.strftime("%d.%m.%Y")
+
+    if not self.operators:
+        print("Нет доступных операторов!")
+        return False
+    operator, price_per_min = random.choice(self.operators)
+    minutes = random.randint(1, 10)
+    amount = price_per_min * minutes
+
+    self.cursor.execute("SELECT Balance FROM mobile_users WHERE UserID = 1")
+    result = self.cursor.fetchone()
+    if not result:
+        print("Пользователь не найден!")
+        return False
+    balance = result[0]
+
+    print(f"День {day_number} ({date_str}):")
+    print(f"  Выбран оператор: {operator}, минут: {minutes}, цена минуты: {price_per_min}, сумма: {amount}")
+
+    if balance < amount:
+        print(f"  Недостаточно средств! Требуется: {amount}, доступно: {balance}. Звонок не совершён.")
+        return False
+
+    new_balance = balance - amount
+    self.cursor.execute("UPDATE mobile_users SET Balance = ? WHERE UserID = 1", (new_balance,))
+    self.conn.commit()
+    print(f"  Звонок успешен. Новый баланс: {new_balance}")
+
+    self.report_operation(date_str, operator, minutes, amount)
+    return True
+```
+
+- Вычисляем дату для текущего дня: стартовая дата + номер дня - 1.
+- Случайно выбираем оператора из списка `self.operators` и случайные минуты (1–10).
+- Вычисляем стоимость звонка.
+- Получаем текущий баланс пользователя.
+- Проверяем, достаточно ли средств. Если нет – выводим сообщение и возвращаем `False`, звонок не совершается, в отчёт не пишется.
+- Если денег хватает – обновляем баланс, фиксируем в БД.
+- Выводим сообщение об успехе.
+- Вызываем `report_operation` для записи в CSV.
+- Возвращаем `True`.
+
+### 2.8. Метод `run_month`
+
+```python
+def run_month(self):
+    print("Начало месяца (30 дней):")
+    for day in range(1, 31):
+        self.make_call(day)
+        print("-" * 40)
+```
+
+- Запускает цикл на 30 итераций (дней).
+- Для каждого дня вызывает `make_call`.
+- Выводит разделитель для наглядности.
+
+### 2.9. Метод `close`
+
+```python
+def close(self):
+    self.conn.close()
+    print("Соединение с базой данных закрыто.")
+```
+
+- Закрывает соединение с БД.
+
+### 2.10. Точка входа
+
+```python
+if __name__ == "__main__":
+    app = MobileCalls()
+    app.run_month()
+    app.close()
+```
+
+- Создаём объект класса, запускаем месяц, закрываем соединение.
+
+---
+
+## 3. Соответствие заданию
+
+| Требование | Реализация |
+|------------|------------|
+| База данных `mobile_calls.db` | Создаётся при подключении в `__init__` |
+| Таблица `mobile_users` с колонками UserID, User, Balance | Создаётся в `create_tables` |
+| Таблица `mobile_price` с колонками PriceID, Mts_Mts, Mts_Tele2, Mts_Yota | Создаётся в `create_tables` |
+| Заполнение mobile_users: 1, User1, 500 | В `fill_initial_data` |
+| Заполнение mobile_price: 1, 1, 2, 3 | В `fill_initial_data` |
+| Файл report_mobile.csv с полями Date, Operator, Count_min, Amount | Создаётся в `report_operation` с заголовками |
+| Метод report_operation | Реализован, принимает 4 значения |
+| 30 итераций (месяц), каждый день 1 звонок | `run_month` вызывает `make_call` 30 раз |
+| Случайный выбор оператора и минут | `random.choice(self.operators)` и `random.randint(1,10)` |
+| Списание Amount = цена * минуты | `amount = price_per_min * minutes` |
+| Проверка достаточности баланса, невозможность уйти в минус | `if balance < amount: return` |
+| Сообщения об успехе/ошибках | Выводятся в `make_call` и `report_operation` |
+| Принты и комментарии | Добавлены |
+
+---
+
+## 4. Тестирование (мысленное)
+
+- Первый запуск: создаст БД, таблицы, добавит пользователя и тарифы, создаст отчёт с заголовками.
+- Далее в течение 30 дней будет пытаться звонить.
+- Баланс 500. Максимальная стоимость звонка 30. Если повезёт с мелкими суммами, баланса хватит на много дней, но рано или поздно закончится.
+- При нехватке средств выведется сообщение, в отчёт запись не пойдёт, баланс не изменится.
+- На второй запуск таблицы уже заполнены, дубликатов не будет.
+
+Всё должно работать корректно.
+
+---
+
+## 5. Возможные доработки (не обязательны)
+
+- Можно добавить более точную имитацию месяцев, если нужно, чтобы каждый день был уникальным.
+- Можно в конце вывести итоговый отчёт или остаток баланса.
+- Можно обработать ситуацию, если таблица тарифов вообще пуста (сейчас проверка есть).
+
+---
+
+Бро, я постарался максимально подробно объяснить каждую строчку. Если что-то осталось непонятным или нужно адаптировать под другой стиль (например, без класса), говори — подстроим. Удачи с заданием! 🚀
